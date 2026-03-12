@@ -11,6 +11,7 @@ const PORT = 3000;
 app.use(cors());
 app.use(express.json());
 
+import authRouter from "./routes/auth.js";
 import companiesRouter from "./routes/companies.js";
 import workersRouter from "./routes/workers.js";
 import clientsRouter from "./routes/clients.js";
@@ -19,9 +20,10 @@ import projectsRouter from "./routes/projects.js";
 
 mongoose
   .connect(process.env.MONGO_URI)
-  .then(() => console.log("Spojeno na MongoDB – dmf_db"))
+  .then(() => console.log("Spojeno na bazu podataka"))
   .catch((err) => console.error("MongoDB greška:", err));
 
+app.use("/api/auth", authRouter);
 app.use("/api/companies", companiesRouter);
 app.use("/api/workers", workersRouter);
 app.use("/api/clients", clientsRouter);

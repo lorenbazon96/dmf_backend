@@ -9,8 +9,13 @@ router.get("/", async (req, res) => {
 });
 
 router.post("/", async (req, res) => {
-  const company = await Company.create({ name: req.body.name });
-  res.status(201).json(company);
+  try {
+    const company = await Company.create({ name: req.body.name });
+    res.status(201).json(company);
+  } catch (err) {
+    if (err.code === 11000) return res.status(400).json({ error: "Company already exists" });
+    res.status(500).json({ error: err.message });
+  }
 });
 
 router.put("/:id", async (req, res) => {
