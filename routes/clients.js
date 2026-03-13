@@ -22,7 +22,7 @@ router.post("/", async (req, res) => {
 
 router.put("/:id", async (req, res) => {
   const client = await Client.findByIdAndUpdate(req.params.id, req.body, {
-    new: true,
+    returnDocument: "after",
   });
   if (!client) return res.status(404).json({ error: "Not found" });
   res.json(client);
