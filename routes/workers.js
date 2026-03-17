@@ -28,6 +28,22 @@ router.put("/:id", async (req, res) => {
   res.json(worker);
 });
 
+router.put("/:id/rating", async (req, res) => {
+  const { operation, rating } = req.body;
+  const worker = await Worker.findById(req.params.id);
+  if (!worker) return res.status(404).json({ error: "Not found" });
+
+  if (worker.ratings[operation] !== undefined) {
+    worker.ratings[operation] = Math.round(
+      worker.ratings[operation] * 0.7 + rating * 0.3,
+    );
+    worker.markModified("ratings");
+    await worker.save();
+  }
+
+  res.json(worker);
+});
+
 router.delete("/:id", async (req, res) => {
   const worker = await Worker.findByIdAndDelete(req.params.id);
   if (!worker) return res.status(404).json({ error: "Not found" });

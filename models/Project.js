@@ -2,9 +2,13 @@ import mongoose from "mongoose";
 
 const assignmentSchema = new mongoose.Schema({
   workerName: String,
+  workerId: { type: String, default: "" },
   operation: String,
   note: { type: String, default: "" },
   type: { type: String, enum: ["auto", "manual"], default: "manual" },
+  status: { type: String, enum: ["pending", "in-progress", "completed"], default: "pending" },
+  estimatedMinutes: { type: Number, default: 0 },
+  completedAt: { type: Date, default: null },
 });
 
 const materialSchema = new mongoose.Schema({
@@ -14,13 +18,13 @@ const materialSchema = new mongoose.Schema({
 });
 
 const treatmentSchema = new mongoose.Schema({
-  pipeCutting: { qty: String, m: String, thickness: String },
-  sheetCutting: { qty: String, m: String, thickness: String },
-  welding: { m: String, size: String },
-  bending: { qty: String, thickness: String },
-  grinding: { m: String },
-  drilling: { qty: String, dia: String },
-  assembly: { qty: String, kg: String },
+  pipeCutting: { qty: String, m: String, thickness: String, cuts: String, cutType: String, profile: String },
+  sheetCutting: { qty: String, m: String, thickness: String, complexity: String, method: String },
+  welding: { m: String, size: String, weldType: String, position: String, passes: String },
+  bending: { qty: String, thickness: String, bends: String, length: String },
+  grinding: { m: String, grindType: String },
+  drilling: { qty: String, dia: String, thickness: String, machine: String },
+  assembly: { qty: String, kg: String, complexity: String },
 }, { _id: false });
 
 const drawingSchema = new mongoose.Schema({
@@ -44,6 +48,7 @@ const projectSchema = new mongoose.Schema({
   responsible: { type: String, default: "" },
   company: { type: String, required: true },
   status: { type: String, default: "active" },
+  startedAt: { type: Date, default: null },
   drawings: [drawingSchema],
   createdAt: { type: Date, default: Date.now },
 });

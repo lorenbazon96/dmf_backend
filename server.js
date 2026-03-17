@@ -10,6 +10,7 @@ const PORT = 3000;
 
 app.use(cors());
 app.use(express.json());
+app.use("/uploads", express.static("uploads"));
 
 import authRouter from "./routes/auth.js";
 import companiesRouter from "./routes/companies.js";
@@ -17,6 +18,7 @@ import workersRouter from "./routes/workers.js";
 import clientsRouter from "./routes/clients.js";
 import warehouseRouter from "./routes/warehouse.js";
 import projectsRouter from "./routes/projects.js";
+import uploadRouter from "./routes/upload.js";
 
 mongoose
   .connect(process.env.MONGO_URI)
@@ -29,6 +31,7 @@ app.use("/api/workers", workersRouter);
 app.use("/api/clients", clientsRouter);
 app.use("/api/warehouse", warehouseRouter);
 app.use("/api/projects", projectsRouter);
+app.use("/api/upload", uploadRouter);
 
 app.listen(PORT, () => {
   console.log(`Server radi na portu ${PORT}`);
