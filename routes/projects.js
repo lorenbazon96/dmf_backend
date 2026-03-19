@@ -1,5 +1,12 @@
 import { Router } from "express";
+import path from "path";
+import fs from "fs";
+import { fileURLToPath } from "url";
 import Project from "../models/Project.js";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const uploadsDir = path.join(__dirname, "..", "uploads");
 
 const router = Router();
 
@@ -37,6 +44,27 @@ router.put("/:id/start", async (req, res) => {
     { new: true },
   );
   if (!project) return res.status(404).json({ error: "Not found" });
+  res.json(project);
+});
+
+router.put("/:id/pause", async (req, res) => {
+  const project = await Project.findById(req.params.id);
+  if (!project) return res.status(404).json({ error: "Not found" });
+  project.status = "paused";
+  project.pausedAt = new Date();
+  await project.save();
+  res.json(project);
+});
+
+router.put("/:id/resume", async (req, res) => {
+  const project = await Project.findById(req.params.id);
+  if (!project) return res.status(404).json({ error: "Not found" });
+  if (project.pausedAt) {
+    project.totalPausedMs = (project.totalPausedMs || 0) + (Date.now() - new Date(project.pausedAt).getTime());
+    project.pausedAt = null;
+  }
+  project.status = "in-progress";
+  await project.save();
   res.json(project);
 });
 
@@ -106,6 +134,16 @@ router.put("/:id/remove-worker", async (req, res) => {
 router.delete("/:id", async (req, res) => {
   const project = await Project.findByIdAndDelete(req.params.id);
   if (!project) return res.status(404).json({ error: "Not found" });
+
+  for (const drawing of project.drawings || []) {
+    for (const field of [drawing.pdfFile, drawing.dwgFile]) {
+      if (!field) continue;
+      const filename = path.basename(field);
+      const filePath = path.join(uploadsDir, filename);
+      fs.unlink(filePath, () => {});
+    }
+  }
+
   res.json({ message: "Deleted" });
 });
 

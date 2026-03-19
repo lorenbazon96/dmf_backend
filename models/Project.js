@@ -49,6 +49,8 @@ const projectSchema = new mongoose.Schema({
   company: { type: String, required: true },
   status: { type: String, default: "active" },
   startedAt: { type: Date, default: null },
+  pausedAt: { type: Date, default: null },
+  totalPausedMs: { type: Number, default: 0 },
   drawings: [drawingSchema],
   createdAt: { type: Date, default: Date.now },
 });

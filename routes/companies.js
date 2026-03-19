@@ -10,7 +10,13 @@ router.get("/", async (req, res) => {
 
 router.post("/", async (req, res) => {
   try {
-    const company = await Company.create({ name: req.body.name });
+    const payload = {};
+    if (req.body.name !== undefined) payload.name = req.body.name;
+    if (req.body.workStart !== undefined) payload.workStart = req.body.workStart;
+    if (req.body.workEnd !== undefined) payload.workEnd = req.body.workEnd;
+    if (req.body.breaks !== undefined) payload.breaks = req.body.breaks;
+    if (req.body.workDays !== undefined) payload.workDays = req.body.workDays;
+    const company = await Company.create(payload);
     res.status(201).json(company);
   } catch (err) {
     if (err.code === 11000) return res.status(400).json({ error: "Company already exists" });
@@ -19,10 +25,16 @@ router.post("/", async (req, res) => {
 });
 
 router.put("/:id", async (req, res) => {
+  const payload = {};
+  if (req.body.name !== undefined) payload.name = req.body.name;
+  if (req.body.workStart !== undefined) payload.workStart = req.body.workStart;
+  if (req.body.workEnd !== undefined) payload.workEnd = req.body.workEnd;
+  if (req.body.breaks !== undefined) payload.breaks = req.body.breaks;
+  if (req.body.workDays !== undefined) payload.workDays = req.body.workDays;
   const company = await Company.findByIdAndUpdate(
     req.params.id,
-    { name: req.body.name },
-    { new: true },
+    payload,
+    { new: true, runValidators: true },
   );
   if (!company) return res.status(404).json({ error: "Not found" });
   res.json(company);
