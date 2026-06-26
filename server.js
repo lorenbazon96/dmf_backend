@@ -6,9 +6,20 @@ import dotenv from "dotenv";
 dotenv.config();
 
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
+const allowedOrigins = (process.env.CORS_ORIGIN || process.env.FRONTEND_URL || "")
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean);
 
-app.use(cors());
+app.use(cors({
+  origin(origin, callback) {
+    if (!origin || allowedOrigins.length === 0 || allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+    return callback(new Error("CORS origin not allowed"));
+  },
+}));
 app.use(express.json());
 app.use("/uploads", express.static("uploads"));
 
@@ -21,9 +32,13 @@ import projectsRouter from "./routes/projects.js";
 import uploadRouter from "./routes/upload.js";
 
 mongoose
-  .connect(process.env.MONGO_URI)
+  .connect(process.env.MONGO_URI, process.env.MONGO_DB_NAME ? { dbName: process.env.MONGO_DB_NAME } : {})
   .then(() => console.log("Spojeno na bazu podataka"))
   .catch((err) => console.error("MongoDB greška:", err));
+
+app.get("/health", (req, res) => {
+  res.json({ ok: true });
+});
 
 app.use("/api/auth", authRouter);
 app.use("/api/companies", companiesRouter);
