@@ -59,14 +59,22 @@ router.post("/login", async (req, res) => {
   if (!user) return res.status(401).json({ error: "Invalid credentials" });
   const match = await user.comparePassword(password);
   if (!match) return res.status(401).json({ error: "Invalid credentials" });
+
+  if (!process.env.JWT_SECRET) {
+    return res.status(500).json({ error: "JWT_SECRET is not configured" });
+  }
+
+  const responseUser = {
+    _id: user._id,
+    email: user.email,
+    fullName: user.fullName,
+    role: user.role,
+    companies: user.companies || [],
+  };
+
   res.json({
-    user: {
-      _id: user._id,
-      email: user.email,
-      fullName: user.fullName,
-      role: user.role,
-      companies: user.companies || [],
-    },
+    ...responseUser,
+    user: responseUser,
     token: createAuthToken(user),
   });
 });
