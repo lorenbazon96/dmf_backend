@@ -3,6 +3,7 @@ import path from "path";
 import fs from "fs";
 import { fileURLToPath } from "url";
 import Project from "../models/Project.js";
+import { companyFilterForUser, userCanAccessCompany } from "../middleware/auth.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -11,8 +12,8 @@ const uploadsDir = path.join(__dirname, "..", "uploads");
 const router = Router();
 
 router.get("/", async (req, res) => {
-  const filter = {};
-  if (req.query.company) filter.company = req.query.company;
+  const filter = companyFilterForUser(req.user, req.query.company);
+  if (!filter) return res.status(403).json({ error: "Company access denied" });
   if (req.query.status) filter.status = req.query.status;
   const projects = await Project.find(filter).sort({ createdAt: -1 });
   res.json(projects);
@@ -21,15 +22,29 @@ router.get("/", async (req, res) => {
 router.get("/:id", async (req, res) => {
   const project = await Project.findById(req.params.id);
   if (!project) return res.status(404).json({ error: "Not found" });
+  if (!userCanAccessCompany(req.user, project.company)) {
+    return res.status(403).json({ error: "Company access denied" });
+  }
   res.json(project);
 });
 
 router.post("/", async (req, res) => {
+  if (!userCanAccessCompany(req.user, req.body.company)) {
+    return res.status(403).json({ error: "Company access denied" });
+  }
   const project = await Project.create(req.body);
   res.status(201).json(project);
 });
 
 router.put("/:id", async (req, res) => {
+  const existing = await Project.findById(req.params.id);
+  if (!existing) return res.status(404).json({ error: "Not found" });
+  if (!userCanAccessCompany(req.user, existing.company)) {
+    return res.status(403).json({ error: "Company access denied" });
+  }
+  if (req.body.company && !userCanAccessCompany(req.user, req.body.company)) {
+    return res.status(403).json({ error: "Company access denied" });
+  }
   const project = await Project.findByIdAndUpdate(req.params.id, req.body, {
     new: true,
   });
@@ -38,6 +53,11 @@ router.put("/:id", async (req, res) => {
 });
 
 router.put("/:id/start", async (req, res) => {
+  const existing = await Project.findById(req.params.id);
+  if (!existing) return res.status(404).json({ error: "Not found" });
+  if (!userCanAccessCompany(req.user, existing.company)) {
+    return res.status(403).json({ error: "Company access denied" });
+  }
   const project = await Project.findByIdAndUpdate(
     req.params.id,
     { startedAt: new Date(), status: "in-progress" },
@@ -50,6 +70,9 @@ router.put("/:id/start", async (req, res) => {
 router.put("/:id/pause", async (req, res) => {
   const project = await Project.findById(req.params.id);
   if (!project) return res.status(404).json({ error: "Not found" });
+  if (!userCanAccessCompany(req.user, project.company)) {
+    return res.status(403).json({ error: "Company access denied" });
+  }
   project.status = "paused";
   project.pausedAt = new Date();
   await project.save();
@@ -59,6 +82,9 @@ router.put("/:id/pause", async (req, res) => {
 router.put("/:id/resume", async (req, res) => {
   const project = await Project.findById(req.params.id);
   if (!project) return res.status(404).json({ error: "Not found" });
+  if (!userCanAccessCompany(req.user, project.company)) {
+    return res.status(403).json({ error: "Company access denied" });
+  }
   if (project.pausedAt) {
     project.totalPausedMs = (project.totalPausedMs || 0) + (Date.now() - new Date(project.pausedAt).getTime());
     project.pausedAt = null;
@@ -72,6 +98,9 @@ router.put("/:id/complete-task", async (req, res) => {
   const { drawingIndex, workerIndex, completedAt } = req.body;
   const project = await Project.findById(req.params.id);
   if (!project) return res.status(404).json({ error: "Not found" });
+  if (!userCanAccessCompany(req.user, project.company)) {
+    return res.status(403).json({ error: "Company access denied" });
+  }
 
   const drawing = project.drawings[drawingIndex];
   if (!drawing) return res.status(400).json({ error: "Invalid drawing index" });
@@ -122,6 +151,9 @@ router.put("/:id/remove-worker", async (req, res) => {
   const { drawingIndex, workerIndex } = req.body;
   const project = await Project.findById(req.params.id);
   if (!project) return res.status(404).json({ error: "Not found" });
+  if (!userCanAccessCompany(req.user, project.company)) {
+    return res.status(403).json({ error: "Company access denied" });
+  }
 
   const drawing = project.drawings[drawingIndex];
   if (!drawing) return res.status(400).json({ error: "Invalid drawing index" });
@@ -132,6 +164,11 @@ router.put("/:id/remove-worker", async (req, res) => {
 });
 
 router.delete("/:id", async (req, res) => {
+  const existing = await Project.findById(req.params.id);
+  if (!existing) return res.status(404).json({ error: "Not found" });
+  if (!userCanAccessCompany(req.user, existing.company)) {
+    return res.status(403).json({ error: "Company access denied" });
+  }
   const project = await Project.findByIdAndDelete(req.params.id);
   if (!project) return res.status(404).json({ error: "Not found" });
 

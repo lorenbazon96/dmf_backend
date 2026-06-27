@@ -21,7 +21,6 @@ app.use(cors({
   },
 }));
 app.use(express.json());
-app.use("/uploads", express.static("uploads"));
 
 import authRouter from "./routes/auth.js";
 import companiesRouter from "./routes/companies.js";
@@ -30,6 +29,8 @@ import clientsRouter from "./routes/clients.js";
 import warehouseRouter from "./routes/warehouse.js";
 import projectsRouter from "./routes/projects.js";
 import uploadRouter from "./routes/upload.js";
+import filesRouter from "./routes/files.js";
+import { authenticateToken } from "./middleware/auth.js";
 
 mongoose
   .connect(process.env.MONGO_URI, process.env.MONGO_DB_NAME ? { dbName: process.env.MONGO_DB_NAME } : {})
@@ -41,12 +42,13 @@ app.get("/health", (req, res) => {
 });
 
 app.use("/api/auth", authRouter);
-app.use("/api/companies", companiesRouter);
-app.use("/api/workers", workersRouter);
-app.use("/api/clients", clientsRouter);
-app.use("/api/warehouse", warehouseRouter);
-app.use("/api/projects", projectsRouter);
-app.use("/api/upload", uploadRouter);
+app.use("/api/companies", authenticateToken, companiesRouter);
+app.use("/api/workers", authenticateToken, workersRouter);
+app.use("/api/clients", authenticateToken, clientsRouter);
+app.use("/api/warehouse", authenticateToken, warehouseRouter);
+app.use("/api/projects", authenticateToken, projectsRouter);
+app.use("/api/upload", authenticateToken, uploadRouter);
+app.use("/api/files", authenticateToken, filesRouter);
 
 app.listen(PORT, () => {
   console.log(`Server radi na portu ${PORT}`);

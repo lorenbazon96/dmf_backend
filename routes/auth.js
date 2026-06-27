@@ -2,8 +2,22 @@ import { Router } from "express";
 import User from "../models/User.js";
 import jwt from "jsonwebtoken";
 import nodemailer from "nodemailer";
+import { authenticateToken, requireAdmin } from "../middleware/auth.js";
 
 const router = Router();
+
+function createAuthToken(user) {
+  return jwt.sign(
+    {
+      id: user._id.toString(),
+      email: user.email,
+      role: user.role,
+      companies: user.companies || [],
+    },
+    process.env.JWT_SECRET,
+    { expiresIn: "7d" },
+  );
+}
 
 let _transporter;
 function getTransporter() {
@@ -19,14 +33,24 @@ function getTransporter() {
   return _transporter;
 }
 
-router.post("/register", async (req, res) => {
+async function allowInitialUserOrAdmin(req, res, next) {
+  const userCount = await User.estimatedDocumentCount();
+  if (userCount === 0) return next();
+
+  return authenticateToken(req, res, () => requireAdmin(req, res, next));
+}
+
+router.post("/register", allowInitialUserOrAdmin, async (req, res) => {
   const { email, password, fullName } = req.body;
   const exists = await User.findOne({ email });
   if (exists) return res.status(400).json({ error: "Email already exists" });
-  const user = await User.create({ email, password, fullName });
+  const userCount = await User.estimatedDocumentCount();
+  const role = userCount === 0 ? "admin" : req.body.role;
+  const companies = Array.isArray(req.body.companies) ? req.body.companies : [];
+  const user = await User.create({ email, password, fullName, role, companies });
   res
     .status(201)
-    .json({ _id: user._id, email: user.email, fullName: user.fullName });
+    .json({ _id: user._id, email: user.email, fullName: user.fullName, role: user.role, companies: user.companies });
 });
 
 router.post("/login", async (req, res) => {
@@ -36,14 +60,22 @@ router.post("/login", async (req, res) => {
   const match = await user.comparePassword(password);
   if (!match) return res.status(401).json({ error: "Invalid credentials" });
   res.json({
-    _id: user._id,
-    email: user.email,
-    fullName: user.fullName,
-    role: user.role,
+    user: {
+      _id: user._id,
+      email: user.email,
+      fullName: user.fullName,
+      role: user.role,
+      companies: user.companies || [],
+    },
+    token: createAuthToken(user),
   });
 });
 
-router.put("/me/:id", async (req, res) => {
+router.put("/me/:id", authenticateToken, async (req, res) => {
+  if (req.user.id !== req.params.id && req.user.role !== "admin") {
+    return res.status(403).json({ error: "Forbidden" });
+  }
+
   const user = await User.findById(req.params.id);
   if (!user) return res.status(404).json({ error: "Not found" });
   if (req.body.fullName !== undefined) user.fullName = req.body.fullName;
@@ -53,7 +85,11 @@ router.put("/me/:id", async (req, res) => {
   res.json({ _id: user._id, email: user.email, fullName: user.fullName });
 });
 
-router.get("/me/:id", async (req, res) => {
+router.get("/me/:id", authenticateToken, async (req, res) => {
+  if (req.user.id !== req.params.id && req.user.role !== "admin") {
+    return res.status(403).json({ error: "Forbidden" });
+  }
+
   const user = await User.findById(req.params.id).select("-password");
   if (!user) return res.status(404).json({ error: "Not found" });
   const obj = user.toObject();
