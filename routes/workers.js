@@ -1,5 +1,6 @@
 import { Router } from "express";
 import Worker from "../models/Worker.js";
+import Project from "../models/Project.js";
 import { companyFilterForUser, userCanAccessCompany } from "../middleware/auth.js";
 import { schemas, validate } from "../middleware/validation.js";
 
@@ -9,7 +10,19 @@ router.get("/", async (req, res) => {
   const filter = companyFilterForUser(req.user, req.query.company);
   if (!filter) return res.status(403).json({ error: "Company access denied" });
   const workers = await Worker.find(filter).sort({ fullName: 1 });
-  res.json(workers);
+  const projects = await Project.find({ ...filter, status:{ $in:["active","in-progress","paused"] } }).select("drawings.assignedWorkers");
+  const workload = new Map();
+  for (const project of projects) for (const drawing of project.drawings || []) for (const task of drawing.assignedWorkers || []) {
+    if (!task.workerId || task.status === "completed") continue;
+    const id=String(task.workerId);
+    workload.set(id,(workload.get(id)||0)+Math.max(0,Number(task.estimatedMinutes)||0));
+  }
+  res.json(workers.map(worker=>{
+    const minutes=Math.round(workload.get(String(worker._id))||0);
+    const hours=Math.floor(minutes/60),rest=minutes%60;
+    const freeIn=hours ? `${hours}h ${rest}min` : minutes ? `${minutes}min` : "";
+    return { ...worker.toObject(), busy:minutes>0, freeIn };
+  }));
 });
 
 router.get("/:id", async (req, res) => {
