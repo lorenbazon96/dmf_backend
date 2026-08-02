@@ -1,6 +1,7 @@
 import { Router } from "express";
 import WarehouseItem from "../models/WarehouseItem.js";
 import { companyFilterForUser, userCanAccessCompany } from "../middleware/auth.js";
+import { schemas, validate } from "../middleware/validation.js";
 
 const router = Router();
 
@@ -20,7 +21,7 @@ router.get("/:id", async (req, res) => {
   res.json(item);
 });
 
-router.post("/", async (req, res) => {
+router.post("/", validate(schemas.warehouse), async (req, res) => {
   if (!userCanAccessCompany(req.user, req.body.company)) {
     return res.status(403).json({ error: "Company access denied" });
   }
@@ -28,7 +29,7 @@ router.post("/", async (req, res) => {
   res.status(201).json(item);
 });
 
-router.put("/:id", async (req, res) => {
+router.put("/:id", validate(schemas.warehouse), async (req, res) => {
   const existing = await WarehouseItem.findById(req.params.id);
   if (!existing) return res.status(404).json({ error: "Not found" });
   if (!userCanAccessCompany(req.user, existing.company)) {
@@ -37,7 +38,7 @@ router.put("/:id", async (req, res) => {
   if (req.body.company && !userCanAccessCompany(req.user, req.body.company)) {
     return res.status(403).json({ error: "Company access denied" });
   }
-  const item = await WarehouseItem.findByIdAndUpdate(req.params.id, req.body, { new: true });
+  const item = await WarehouseItem.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true });
   if (!item) return res.status(404).json({ error: "Not found" });
   res.json(item);
 });

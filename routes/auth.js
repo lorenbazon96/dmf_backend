@@ -3,6 +3,8 @@ import User from "../models/User.js";
 import jwt from "jsonwebtoken";
 import nodemailer from "nodemailer";
 import { authenticateToken, requireAdmin } from "../middleware/auth.js";
+import rateLimit from "express-rate-limit";
+import { schemas, validate } from "../middleware/validation.js";
 
 const router = Router();
 
@@ -13,6 +15,7 @@ function createAuthToken(user) {
       email: user.email,
       role: user.role,
       companies: user.companies || [],
+      purpose: "auth",
     },
     process.env.JWT_SECRET,
     { expiresIn: "7d" },
@@ -40,7 +43,7 @@ async function allowInitialUserOrAdmin(req, res, next) {
   return authenticateToken(req, res, () => requireAdmin(req, res, next));
 }
 
-router.post("/register", allowInitialUserOrAdmin, async (req, res) => {
+router.post("/register", validate(schemas.register), allowInitialUserOrAdmin, async (req, res) => {
   const { email, password, fullName } = req.body;
   const exists = await User.findOne({ email });
   if (exists) return res.status(400).json({ error: "Email already exists" });
@@ -53,7 +56,8 @@ router.post("/register", allowInitialUserOrAdmin, async (req, res) => {
     .json({ _id: user._id, email: user.email, fullName: user.fullName, role: user.role, companies: user.companies });
 });
 
-router.post("/login", async (req, res) => {
+const authLimiter = rateLimit({ windowMs: 15*60*1000, limit: 10, standardHeaders: true, legacyHeaders: false });
+router.post("/login", authLimiter, validate(schemas.login), async (req, res) => {
   const { email, password } = req.body;
   const user = await User.findOne({ email });
   if (!user) return res.status(401).json({ error: "Invalid credentials" });
@@ -79,7 +83,7 @@ router.post("/login", async (req, res) => {
   });
 });
 
-router.put("/me/:id", authenticateToken, async (req, res) => {
+router.put("/me/:id", authenticateToken, validate(schemas.me), async (req, res) => {
   if (req.user.id !== req.params.id && req.user.role !== "admin") {
     return res.status(403).json({ error: "Forbidden" });
   }
@@ -105,16 +109,16 @@ router.get("/me/:id", authenticateToken, async (req, res) => {
   res.json(obj);
 });
 
-router.post("/forgot-password", async (req, res) => {
+router.post("/forgot-password", authLimiter, validate(schemas.forgot), async (req, res) => {
   const { email } = req.body;
   const user = await User.findOne({ email });
   if (!user) return res.json({ ok: true });
 
-  const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, {
+  const token = jwt.sign({ id: user._id, purpose: "password-reset" }, process.env.PASSWORD_RESET_SECRET, {
     expiresIn: "1h",
   });
 
-  const resetUrl = `${process.env.FRONTEND_URL || "http://localhost:8080"}/#reset-password?token=${token}`;
+  const resetUrl = `${process.env.FRONTEND_URL || "http://localhost:8080"}/#/reset-password?token=${token}`;
 
   await getTransporter().sendMail({
     from: process.env.EMAIL_USER,
@@ -131,10 +135,11 @@ router.post("/forgot-password", async (req, res) => {
   res.json({ ok: true });
 });
 
-router.post("/reset-password", async (req, res) => {
+router.post("/reset-password", authLimiter, validate(schemas.reset), async (req, res) => {
   const { token, password } = req.body;
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const decoded = jwt.verify(token, process.env.PASSWORD_RESET_SECRET);
+    if (decoded.purpose !== "password-reset") throw new Error("Invalid token purpose");
     const user = await User.findById(decoded.id);
     if (!user) return res.status(404).json({ error: "User not found" });
     user.password = password;

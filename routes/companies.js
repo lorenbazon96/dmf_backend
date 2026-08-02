@@ -6,6 +6,7 @@ import Project from "../models/Project.js";
 import WarehouseItem from "../models/WarehouseItem.js";
 import Worker from "../models/Worker.js";
 import { userCanAccessCompany } from "../middleware/auth.js";
+import { schemas, validate } from "../middleware/validation.js";
 
 const router = Router();
 
@@ -15,7 +16,7 @@ router.get("/", async (req, res) => {
   res.json(companies);
 });
 
-router.post("/", async (req, res) => {
+router.post("/", validate(schemas.company), async (req, res) => {
   try {
     const payload = {};
     if (req.body.name !== undefined) payload.name = req.body.name;
@@ -32,11 +33,11 @@ router.post("/", async (req, res) => {
     res.status(201).json(company);
   } catch (err) {
     if (err.code === 11000) return res.status(400).json({ error: "Company already exists" });
-    res.status(500).json({ error: err.message });
+    throw err;
   }
 });
 
-router.put("/:id", async (req, res) => {
+router.put("/:id", validate(schemas.company), async (req, res) => {
   const existing = await Company.findById(req.params.id);
   if (!existing) return res.status(404).json({ error: "Not found" });
   if (!userCanAccessCompany(req.user, existing.name)) {

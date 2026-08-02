@@ -2,26 +2,9 @@ import express from "express";
 import cors from "cors";
 import mongoose from "mongoose";
 import dotenv from "dotenv";
-
-dotenv.config();
-
-const app = express();
-const PORT = process.env.PORT || 3000;
-const allowedOrigins = (process.env.CORS_ORIGIN || process.env.FRONTEND_URL || "")
-  .split(",")
-  .map((origin) => origin.trim())
-  .filter(Boolean);
-
-app.use(cors({
-  origin(origin, callback) {
-    if (!origin || allowedOrigins.length === 0 || allowedOrigins.includes(origin)) {
-      return callback(null, true);
-    }
-    return callback(new Error("CORS origin not allowed"));
-  },
-}));
-app.use(express.json());
-
+import helmet from "helmet";
+import { pathToFileURL } from "url";
+import { validateEnv } from "./config.js";
 import authRouter from "./routes/auth.js";
 import companiesRouter from "./routes/companies.js";
 import workersRouter from "./routes/workers.js";
@@ -32,24 +15,20 @@ import uploadRouter from "./routes/upload.js";
 import filesRouter from "./routes/files.js";
 import { authenticateToken } from "./middleware/auth.js";
 
-mongoose
-  .connect(process.env.MONGO_URI, process.env.MONGO_DB_NAME ? { dbName: process.env.MONGO_DB_NAME } : {})
-  .then(() => console.log("Spojeno na bazu podataka"))
-  .catch((err) => console.error("MongoDB greška:", err));
-
-app.get("/health", (req, res) => {
-  res.json({ ok: true });
-});
-
-app.use("/api/auth", authRouter);
-app.use("/api/companies", authenticateToken, companiesRouter);
-app.use("/api/workers", authenticateToken, workersRouter);
-app.use("/api/clients", authenticateToken, clientsRouter);
-app.use("/api/warehouse", authenticateToken, warehouseRouter);
-app.use("/api/projects", authenticateToken, projectsRouter);
-app.use("/api/upload", authenticateToken, uploadRouter);
-app.use("/api/files", authenticateToken, filesRouter);
-
-app.listen(PORT, () => {
-  console.log(`Server radi na portu ${PORT}`);
-});
+dotenv.config();
+export function createApp() {
+ const app=express();
+ const configured=(process.env.CORS_ORIGIN||process.env.FRONTEND_URL||"").split(",").map(x=>x.trim()).filter(Boolean);
+ const origins=configured.length?configured:(process.env.NODE_ENV!=="production"?["http://localhost:8080","http://localhost:5173"]:[]);
+ app.use(helmet());
+ app.use(cors({origin(origin,cb){if(!origin||origins.includes(origin))return cb(null,true);const e=new Error("CORS rejected");e.status=403;cb(e);}}));
+ app.use(express.json({limit:"1mb"}));
+ app.get("/health",(req,res)=>{const ok=mongoose.connection.readyState===1;res.status(ok?200:503).json({ok,database:ok?"up":"down"});});
+ app.use("/api/auth",authRouter);
+ for(const [path,router] of [["companies",companiesRouter],["workers",workersRouter],["clients",clientsRouter],["warehouse",warehouseRouter],["projects",projectsRouter],["upload",uploadRouter],["files",filesRouter]]) app.use(`/api/${path}`,authenticateToken,router);
+ app.use((req,res)=>res.status(404).json({error:"Not found"}));
+ app.use((err,req,res,next)=>{console.error(err);const status=err.status||((err.name==="ValidationError"||err.name==="CastError")?400:500);res.status(status).json({error:status===500?"Internal server error":status===400?"Invalid request":"Request failed"});});
+ return app;
+}
+export async function startServer(){validateEnv();await mongoose.connect(process.env.MONGO_URI,process.env.MONGO_DB_NAME?{dbName:process.env.MONGO_DB_NAME}:{});const server=createApp().listen(process.env.PORT||3000,()=>console.log(`Server radi na portu ${process.env.PORT||3000}`));let closing=false;const shutdown=async signal=>{if(closing)return;closing=true;console.log(`${signal}: shutting down`);server.close(async()=>{await mongoose.disconnect();process.exit(0);});setTimeout(()=>process.exit(1),10000).unref();};process.on("SIGTERM",()=>shutdown("SIGTERM"));process.on("SIGINT",()=>shutdown("SIGINT"));return server;}
+if(import.meta.url===pathToFileURL(process.argv[1]).href) startServer().catch(err=>{console.error("Startup failed",err.message);process.exit(1);});

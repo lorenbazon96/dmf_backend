@@ -1,6 +1,7 @@
 import { Router } from "express";
 import Client from "../models/Client.js";
 import { companyFilterForUser, userCanAccessCompany } from "../middleware/auth.js";
+import { schemas, validate } from "../middleware/validation.js";
 
 const router = Router();
 
@@ -20,7 +21,7 @@ router.get("/:id", async (req, res) => {
   res.json(client);
 });
 
-router.post("/", async (req, res) => {
+router.post("/", validate(schemas.client), async (req, res) => {
   if (!userCanAccessCompany(req.user, req.body.company)) {
     return res.status(403).json({ error: "Company access denied" });
   }
@@ -28,7 +29,7 @@ router.post("/", async (req, res) => {
   res.status(201).json(client);
 });
 
-router.put("/:id", async (req, res) => {
+router.put("/:id", validate(schemas.client), async (req, res) => {
   const existing = await Client.findById(req.params.id);
   if (!existing) return res.status(404).json({ error: "Not found" });
   if (!userCanAccessCompany(req.user, existing.company)) {
@@ -37,7 +38,7 @@ router.put("/:id", async (req, res) => {
   if (req.body.company && !userCanAccessCompany(req.user, req.body.company)) {
     return res.status(403).json({ error: "Company access denied" });
   }
-  const client = await Client.findByIdAndUpdate(req.params.id, req.body, { returnDocument: "after" });
+  const client = await Client.findByIdAndUpdate(req.params.id, req.body, { returnDocument: "after", runValidators: true });
   if (!client) return res.status(404).json({ error: "Not found" });
   res.json(client);
 });

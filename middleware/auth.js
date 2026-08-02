@@ -15,6 +15,7 @@ export async function authenticateToken(req, res, next) {
 
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    if (decoded.purpose !== "auth") throw new Error("Invalid token purpose");
     const user = await User.findById(decoded.id).select("email role companies");
     if (!user) return res.status(401).json({ error: "Invalid or expired token" });
 

@@ -4,6 +4,7 @@ import fs from "fs";
 import { fileURLToPath } from "url";
 import Project from "../models/Project.js";
 import { companyFilterForUser, userCanAccessCompany } from "../middleware/auth.js";
+import { schemas, validate } from "../middleware/validation.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -28,7 +29,7 @@ router.get("/:id", async (req, res) => {
   res.json(project);
 });
 
-router.post("/", async (req, res) => {
+router.post("/", validate(schemas.project), async (req, res) => {
   if (!userCanAccessCompany(req.user, req.body.company)) {
     return res.status(403).json({ error: "Company access denied" });
   }
@@ -36,7 +37,7 @@ router.post("/", async (req, res) => {
   res.status(201).json(project);
 });
 
-router.put("/:id", async (req, res) => {
+router.put("/:id", validate(schemas.project), async (req, res) => {
   const existing = await Project.findById(req.params.id);
   if (!existing) return res.status(404).json({ error: "Not found" });
   if (!userCanAccessCompany(req.user, existing.company)) {
@@ -46,7 +47,7 @@ router.put("/:id", async (req, res) => {
     return res.status(403).json({ error: "Company access denied" });
   }
   const project = await Project.findByIdAndUpdate(req.params.id, req.body, {
-    new: true,
+    new: true, runValidators: true,
   });
   if (!project) return res.status(404).json({ error: "Not found" });
   res.json(project);
@@ -94,7 +95,7 @@ router.put("/:id/resume", async (req, res) => {
   res.json(project);
 });
 
-router.put("/:id/complete-task", async (req, res) => {
+router.put("/:id/complete-task", validate(schemas.completeTask), async (req, res) => {
   const { drawingIndex, workerIndex, completedAt } = req.body;
   const project = await Project.findById(req.params.id);
   if (!project) return res.status(404).json({ error: "Not found" });
@@ -147,7 +148,7 @@ router.put("/:id/complete-task", async (req, res) => {
   res.json(project);
 });
 
-router.put("/:id/remove-worker", async (req, res) => {
+router.put("/:id/remove-worker", validate(schemas.removeWorker), async (req, res) => {
   const { drawingIndex, workerIndex } = req.body;
   const project = await Project.findById(req.params.id);
   if (!project) return res.status(404).json({ error: "Not found" });
@@ -157,6 +158,9 @@ router.put("/:id/remove-worker", async (req, res) => {
 
   const drawing = project.drawings[drawingIndex];
   if (!drawing) return res.status(400).json({ error: "Invalid drawing index" });
+  if (!drawing.assignedWorkers[workerIndex]) {
+    return res.status(400).json({ error: "Invalid worker index" });
+  }
 
   drawing.assignedWorkers.splice(workerIndex, 1);
   await project.save();
