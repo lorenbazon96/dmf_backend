@@ -6,15 +6,22 @@ const assignmentSchema = new mongoose.Schema({
   operation: String,
   note: { type: String, default: "" },
   type: { type: String, enum: ["auto", "manual"], default: "manual" },
-  status: { type: String, enum: ["pending", "in-progress", "completed"], default: "pending" },
+  status: { type: String, enum: ["pending", "in-progress", "paused", "completed"], default: "pending" },
   estimatedMinutes: { type: Number, default: 0 },
+  startedAt: { type: Date, default: null },
+  pausedAt: { type: Date, default: null },
+  totalPausedMs: { type: Number, default: 0 },
+  actualMinutes: { type: Number, default: null },
+  pausedByProject: { type: Boolean, default: false },
+  history: [{ from: String, to: String, at: Date, actorUserId: mongoose.Schema.Types.ObjectId, reason: String }],
   completedAt: { type: Date, default: null },
 });
 
 const materialSchema = new mongoose.Schema({
+  warehouseItemId: { type: mongoose.Schema.Types.ObjectId, ref: "WarehouseItem", default: null },
   name: String,
   specs: { type: String, default: "" },
-  useQty: { type: Number, default: 1 },
+  useQty: { type: Number, default: 1, min: 0.000000001 },
 });
 
 const treatmentSchema = new mongoose.Schema({
@@ -47,7 +54,10 @@ const projectSchema = new mongoose.Schema({
   client: { type: String, default: "" },
   responsible: { type: String, default: "" },
   company: { type: String, required: true },
-  status: { type: String, default: "active" },
+  status: { type: String, enum: ["active", "in-progress", "paused", "completed"], default: "active" },
+  completedAt: { type: Date, default: null },
+  revision: { type: Number, default: 0 },
+  inventoryMode: { type: String, enum: ["legacy-consumed", "reserved-v2"], default: undefined },
   startedAt: { type: Date, default: null },
   pausedAt: { type: Date, default: null },
   totalPausedMs: { type: Number, default: 0 },

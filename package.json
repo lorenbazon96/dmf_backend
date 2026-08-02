@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node server.js",
     "test": "node --test",
-    "check": "node --check server.js && node --check routes/auth.js && node --check routes/projects.js && node --check middleware/validation.js"
+    "check": "node --check server.js && node --check routes/auth.js && node --check routes/projects.js && node --check routes/warehouse.js && node --check middleware/validation.js",
+    "migrate:inventory-v2": "node scripts/migrate-inventory-v2.js"
   },
   "repository": {
     "type": "git",

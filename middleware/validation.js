@@ -5,6 +5,26 @@ export const password = z.string().min(8).max(128);
 const text = z.string().trim().max(1000);
 const company = z.string().trim().min(1).max(120);
 const index = z.number().int().min(0);
+const objectId = z.string().regex(/^[a-f\d]{24}$/i);
+const assignedMaterial = z.object({
+  warehouseItemId: objectId.nullable().optional(),
+  name: text.optional(),
+  specs: text.optional(),
+  useQty: z.number().finite().positive(),
+}).passthrough();
+const assignedWorker = z.object({
+  workerId: z.union([objectId, z.literal("")]).optional(),
+  workerName: text.optional(),
+  operation: text.optional(),
+  note: text.optional(),
+  type: z.enum(["auto", "manual"]).optional(),
+  status: z.enum(["pending", "in-progress", "paused", "completed"]).optional(),
+  estimatedMinutes: z.number().finite().min(0).optional(),
+}).passthrough();
+const drawing = z.object({
+  assignedMaterials: z.array(assignedMaterial).optional(),
+  assignedWorkers: z.array(assignedWorker).optional(),
+}).passthrough();
 
 export const schemas = {
   register: z.object({ email, password, fullName: text.optional(), role: z.enum(["admin", "user"]).optional(), companies: z.array(company).max(100).optional() }),
@@ -17,7 +37,9 @@ export const schemas = {
   worker: z.object({ fullName: text.optional(), email: z.union([email, z.literal("")]).optional(), address: text.optional(), contact: text.optional(), jobPosition: text.optional(), busy: z.boolean().optional(), freeIn: text.optional(), company: company.optional(), ratings: z.record(z.string(), z.number().min(0).max(100)).optional(), operations: z.record(z.string(), z.boolean()).optional(), projectsCompleted: z.number().int().min(0).optional() }),
   workerRating: z.object({ operation: z.enum(["pipeCutting", "sheetCutting", "welding", "bending", "grinding", "drilling", "assembly"]), rating: z.number().min(0).max(100) }),
   warehouse: z.object({ type: text.optional(), name: text.optional(), specs: text.optional(), qty: z.number().min(0).optional(), company: company.optional() }),
-  project: z.object({ rn: text.optional(), name: text.optional(), client: text.optional(), responsible: text.optional(), company: company.optional(), status: text.optional(), startedAt: z.coerce.date().nullable().optional(), pausedAt: z.coerce.date().nullable().optional(), totalPausedMs: z.number().min(0).optional(), drawings: z.array(z.record(z.string(), z.unknown())).max(1000).optional() }),
+  warehouseMetadata: z.object({ type: text.optional(), name: text.optional(), specs: text.optional() }),
+  warehouseAdjustment: z.object({ delta: z.number().finite().refine(v => v !== 0), reason: text.min(1) }),
+  project: z.object({ rn: text.optional(), name: text.optional(), client: text.optional(), responsible: text.optional(), company: company.optional(), drawings: z.array(drawing).max(1000).optional() }),
   completeTask: z.object({ drawingIndex: index, workerIndex: index, completedAt: z.coerce.date().optional() }),
   removeWorker: z.object({ drawingIndex: index, workerIndex: index }),
 };

@@ -14,6 +14,7 @@ import projectsRouter from "./routes/projects.js";
 import uploadRouter from "./routes/upload.js";
 import filesRouter from "./routes/files.js";
 import { authenticateToken } from "./middleware/auth.js";
+import { startOrphanCleanup } from "./services/orphanCleanup.js";
 
 dotenv.config();
 export function createApp() {
@@ -27,8 +28,15 @@ export function createApp() {
  app.use("/api/auth",authRouter);
  for(const [path,router] of [["companies",companiesRouter],["workers",workersRouter],["clients",clientsRouter],["warehouse",warehouseRouter],["projects",projectsRouter],["upload",uploadRouter],["files",filesRouter]]) app.use(`/api/${path}`,authenticateToken,router);
  app.use((req,res)=>res.status(404).json({error:"Not found"}));
- app.use((err,req,res,next)=>{console.error(err);const status=err.status||((err.name==="ValidationError"||err.name==="CastError")?400:500);res.status(status).json({error:status===500?"Internal server error":status===400?"Invalid request":"Request failed"});});
+ app.use((err,req,res,next)=>{
+  console.error(err);
+  if (err.code === 11000) {
+   return res.status(409).json({ error: "Resource already exists", code: "DUPLICATE_RESOURCE" });
+  }
+  const status=err.status||((err.name==="ValidationError"||err.name==="CastError")?400:500);
+  return res.status(status).json({error:status===500?"Internal server error":err.message||"Request failed",...(err.code?{code:err.code}:{})});
+ });
  return app;
 }
-export async function startServer(){validateEnv();await mongoose.connect(process.env.MONGO_URI,process.env.MONGO_DB_NAME?{dbName:process.env.MONGO_DB_NAME}:{});const server=createApp().listen(process.env.PORT||3000,()=>console.log(`Server radi na portu ${process.env.PORT||3000}`));let closing=false;const shutdown=async signal=>{if(closing)return;closing=true;console.log(`${signal}: shutting down`);server.close(async()=>{await mongoose.disconnect();process.exit(0);});setTimeout(()=>process.exit(1),10000).unref();};process.on("SIGTERM",()=>shutdown("SIGTERM"));process.on("SIGINT",()=>shutdown("SIGINT"));return server;}
+export async function startServer(){validateEnv();await mongoose.connect(process.env.MONGO_URI,process.env.MONGO_DB_NAME?{dbName:process.env.MONGO_DB_NAME}:{});const stopCleanup=startOrphanCleanup();const server=createApp().listen(process.env.PORT||3000,()=>console.log(`Server radi na portu ${process.env.PORT||3000}`));let closing=false;const shutdown=async signal=>{if(closing)return;closing=true;stopCleanup();console.log(`${signal}: shutting down`);server.close(async()=>{await mongoose.disconnect();process.exit(0);});setTimeout(()=>process.exit(1),10000).unref();};process.on("SIGTERM",()=>shutdown("SIGTERM"));process.on("SIGINT",()=>shutdown("SIGINT"));return server;}
 if(import.meta.url===pathToFileURL(process.argv[1]).href) startServer().catch(err=>{console.error("Startup failed",err.message);process.exit(1);});
