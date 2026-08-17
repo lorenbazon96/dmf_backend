@@ -24,6 +24,7 @@ test("project validation preserves drawing payload shape and rejects invalid use
  const base={drawings:[{drawingNo:"1",assignedWorkers:[{workerId:"507f1f77bcf86cd799439011",workerName:"A",frontendField:true}],assignedMaterials:[{warehouseItemId:"507f1f77bcf86cd799439012",name:"Steel",useQty:1,frontendField:true}]}]};
  const parsed=schemas.project.parse(base); assert.equal(parsed.drawings[0].drawingNo,"1"); assert.equal(parsed.drawings[0].assignedWorkers[0].frontendField,true);
  for(const useQty of [0,-1,Infinity,NaN])assert.equal(schemas.project.safeParse({drawings:[{assignedMaterials:[{useQty}]}]}).success,false);
+ assert.equal(schemas.project.safeParse({drawings:[{treatments:[null]}]}).success,false);
 });
 test("warehouse movements require traceable receipt and issue details",()=>{
  assert.equal(schemas.warehouseAdjustment.safeParse({direction:"in",quantity:2,supplier:"Supplier"}).success,true);

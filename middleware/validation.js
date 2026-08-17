@@ -21,9 +21,11 @@ const assignedWorker = z.object({
   status: z.enum(["pending", "in-progress", "paused", "completed"]).optional(),
   estimatedMinutes: z.number().finite().min(0).optional(),
 }).passthrough();
+const treatment = z.object({}).passthrough();
 const drawing = z.object({
   assignedMaterials: z.array(assignedMaterial).optional(),
   assignedWorkers: z.array(assignedWorker).optional(),
+  treatments: z.array(treatment).optional(),
 }).passthrough();
 const warehouseReceipt = z.object({ direction: z.literal("in"), quantity: z.number().finite().positive(), supplier: text.min(1), note: text.optional() });
 const warehouseIssue = z.object({ direction: z.literal("out"), quantity: z.number().finite().positive(), destination: text.min(1), note: text.optional() });
