@@ -15,4 +15,13 @@ warehouseItemSchema.pre("validate", function () {
   if (this.reservedQty > this.qty) this.invalidate("reservedQty", "reservedQty cannot exceed qty");
 });
 
+warehouseItemSchema.index(
+  { company: 1, name: 1, specs: 1 },
+  {
+    unique: true,
+    name: "unique_warehouse_item_identity",
+    collation: { locale: "hr", strength: 2 },
+  },
+);
+
 export default mongoose.model("WarehouseItem", warehouseItemSchema);

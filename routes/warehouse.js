@@ -6,7 +6,9 @@ import { companyFilterForUser, userCanAccessCompany } from "../middleware/auth.j
 import { schemas, validate } from "../middleware/validation.js";
 
 const router = Router();
-export const warehouseItemProjectReferenceQuery = warehouseItemId => ({
+export const warehouseItemCanBeDeleted = item => Number(item.reservedQty || 0) <= 0;
+export const warehouseItemActiveProjectReferenceQuery = warehouseItemId => ({
+  status: { $ne: "completed" },
   "drawings.assignedMaterials.warehouseItemId": warehouseItemId,
 });
 
@@ -92,9 +94,8 @@ router.delete("/:id", async (req, res) => {
       const item = await WarehouseItem.findById(req.params.id).session(session);
       if (!item) throw Object.assign(new Error("Not found"), { status: 404 });
       if (!userCanAccessCompany(req.user, item.company)) throw Object.assign(new Error("Company access denied"), { status: 403 });
-      const referenced = await Project.exists(warehouseItemProjectReferenceQuery(item._id)).session(session);
-      const hasMovements = await WarehouseMovement.exists({ warehouseItemId: item._id }).session(session);
-      if (item.reservedQty > 0 || referenced || hasMovements) throw Object.assign(new Error("Warehouse item is in use or has history", { cause: "history" }), { status: 409, code: "WAREHOUSE_ITEM_IN_USE" });
+      const usedByActiveProject = await Project.exists(warehouseItemActiveProjectReferenceQuery(item._id)).session(session);
+      if (!warehouseItemCanBeDeleted(item) || usedByActiveProject) throw Object.assign(new Error("Warehouse item is used by an active project"), { status: 409, code: "WAREHOUSE_ITEM_IN_USE" });
       const result = await WarehouseItem.deleteOne({ _id: item._id, reservedQty: 0 }, { session });
       if (!result.deletedCount) throw Object.assign(new Error("Warehouse item is in use"), { status: 409, code: "WAREHOUSE_ITEM_IN_USE" });
     });

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import jwt from "jsonwebtoken";
 import { authenticateToken, companyFilterForUser, userCanAccessCompany } from "../middleware/auth.js";
 import { schemas } from "../middleware/validation.js";
+import WarehouseItem from "../models/WarehouseItem.js";
 
 test("auth middleware rejects a reset-purpose bearer before database lookup", async () => {
  process.env.JWT_SECRET="a".repeat(32);
@@ -32,6 +33,12 @@ test("warehouse movements require traceable receipt and issue details",()=>{
  assert.equal(schemas.warehouseAdjustment.safeParse({direction:"out",quantity:0,destination:"Job site"}).success,false);
  assert.equal(schemas.warehouse.safeParse({qty:5}).success,false);
  assert.equal(schemas.warehouse.safeParse({qty:5,supplier:"Supplier"}).success,true);
+});
+test("warehouse identity is unique only for the company, name and specification combination",()=>{
+ const [fields,options]=WarehouseItem.schema.indexes().find(([,indexOptions])=>indexOptions.name==="unique_warehouse_item_identity");
+ assert.deepEqual(fields,{company:1,name:1,specs:1});
+ assert.equal(options.unique,true);
+ assert.deepEqual(options.collation,{locale:"hr",strength:2});
 });
 test("company access permits assigned users and preserves non-admin company filtering",()=>{
  const user={role:"user",companies:["A"]};
