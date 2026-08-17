@@ -1,6 +1,8 @@
 import { Router } from "express";
 import User from "../models/User.js";
+import InstallationState from "../models/InstallationState.js";
 import jwt from "jsonwebtoken";
+import bcrypt from "bcryptjs";
 import nodemailer from "nodemailer";
 import { authenticateToken, requireAdmin } from "../middleware/auth.js";
 import rateLimit from "express-rate-limit";
@@ -37,8 +39,14 @@ function getTransporter() {
 }
 
 async function allowInitialUserOrAdmin(req, res, next) {
-  const userCount = await User.estimatedDocumentCount();
-  if (userCount === 0) return next();
+  const [hasUser, initialized] = await Promise.all([
+    User.exists({}),
+    InstallationState.exists({ _id: "initial-admin" }),
+  ]);
+  if (!hasUser && !initialized) {
+    req.initialSetup = true;
+    return next();
+  }
 
   return authenticateToken(req, res, () => requireAdmin(req, res, next));
 }
@@ -47,10 +55,29 @@ router.post("/register", validate(schemas.register), allowInitialUserOrAdmin, as
   const { email, password, fullName } = req.body;
   const exists = await User.findOne({ email });
   if (exists) return res.status(400).json({ error: "Email already exists" });
-  const userCount = await User.estimatedDocumentCount();
-  const role = userCount === 0 ? "admin" : req.body.role;
   const companies = Array.isArray(req.body.companies) ? req.body.companies : [];
-  const user = await User.create({ email, password, fullName, role, companies });
+  let user;
+  if (req.initialSetup) {
+    const session = await User.startSession();
+    try {
+      await session.withTransaction(async () => {
+        await InstallationState.create([{ _id: "initial-admin" }], { session });
+        if (await User.exists({}).session(session)) {
+          throw Object.assign(new Error("Admin access required"), { status: 403, code: "ADMIN_ACCESS_REQUIRED" });
+        }
+        [user] = await User.create([{ email, password, fullName, role: "admin", companies }], { session });
+      });
+    } catch (error) {
+      if (error.code === 11000 || await User.exists({})) {
+        return res.status(403).json({ error: "Admin access required", code: "ADMIN_ACCESS_REQUIRED" });
+      }
+      throw error;
+    } finally {
+      await session.endSession();
+    }
+  } else {
+    user = await User.create({ email, password, fullName, role: req.body.role, companies });
+  }
   res
     .status(201)
     .json({ _id: user._id, email: user.email, fullName: user.fullName, role: user.role, companies: user.companies });
@@ -111,10 +138,14 @@ router.get("/me/:id", authenticateToken, async (req, res) => {
 
 router.post("/forgot-password", authLimiter, validate(schemas.forgot), async (req, res) => {
   const { email } = req.body;
-  const user = await User.findOne({ email });
+  const user = await User.findOneAndUpdate(
+    { email },
+    { $inc: { passwordResetVersion: 1 } },
+    { new: true },
+  );
   if (!user) return res.json({ ok: true });
 
-  const token = jwt.sign({ id: user._id, purpose: "password-reset" }, process.env.PASSWORD_RESET_SECRET, {
+  const token = jwt.sign({ id: user._id, purpose: "password-reset", version: user.passwordResetVersion }, process.env.PASSWORD_RESET_SECRET, {
     expiresIn: "1h",
   });
 
@@ -137,17 +168,20 @@ router.post("/forgot-password", authLimiter, validate(schemas.forgot), async (re
 
 router.post("/reset-password", authLimiter, validate(schemas.reset), async (req, res) => {
   const { token, password } = req.body;
+  let decoded;
   try {
-    const decoded = jwt.verify(token, process.env.PASSWORD_RESET_SECRET);
+    decoded = jwt.verify(token, process.env.PASSWORD_RESET_SECRET);
     if (decoded.purpose !== "password-reset") throw new Error("Invalid token purpose");
-    const user = await User.findById(decoded.id);
-    if (!user) return res.status(404).json({ error: "User not found" });
-    user.password = password;
-    await user.save();
-    res.json({ ok: true });
   } catch {
-    res.status(400).json({ error: "Invalid or expired token" });
+    return res.status(400).json({ error: "Invalid or expired token" });
   }
+  const passwordHash = await bcrypt.hash(password, 10);
+  const user = await User.findOneAndUpdate(
+    { _id: decoded.id, passwordResetVersion: decoded.version },
+    { $set: { password: passwordHash }, $inc: { passwordResetVersion: 1 } },
+  );
+  if (!user) return res.status(400).json({ error: "Invalid or expired token" });
+  res.json({ ok: true });
 });
 
 export default router;

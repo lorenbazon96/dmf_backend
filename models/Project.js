@@ -65,4 +65,6 @@ const projectSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now },
 });
 
+projectSchema.index({ company: 1, rn: 1 }, { unique: true });
+
 export default mongoose.model("Project", projectSchema);

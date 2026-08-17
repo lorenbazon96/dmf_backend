@@ -7,7 +7,7 @@ import WarehouseItem from "../models/WarehouseItem.js";
 import WarehouseMovement from "../models/WarehouseMovement.js";
 import Worker from "../models/Worker.js";
 import { aggregateMaterials, inventoryDelta, resolveMaterials, validTransition } from "../services/inventory.js";
-import { activateAvailableTasks, canTransitionTask, elapsedMinutes, findTask, nextRevision, projectAllowsTaskAction } from "../services/tasks.js";
+import { activateAvailableTasks, canTransitionTask, elapsedMinutes, findTask, hasRequiredWorker, nextRevision, projectAllowsTaskAction } from "../services/tasks.js";
 import { companyFilterForUser, userCanAccessCompany } from "../middleware/auth.js";
 import { schemas, validate } from "../middleware/validation.js";
 
@@ -17,12 +17,24 @@ const fail = (message, status, code) => Object.assign(new Error(message), { stat
 const assignments = drawings => (drawings || []).flatMap(d => d.assignedWorkers || []);
 const materialShape = drawings => (drawings || []).map(d => (d.assignedMaterials || []).map(m => ({ name:m.name || "", specs:m.specs || "", useQty:Number(m.useQty || 0), warehouseItemId:m.warehouseItemId ? String(m.warehouseItemId) : null })));
 const materialsEqual = (a,b) => JSON.stringify(materialShape(a)) === JSON.stringify(materialShape(b));
-const filesFor = projects => projects.flatMap(p => (p.drawings || []).flatMap(d => [d.pdfFile, d.dwgFile])).filter(Boolean).map(x => path.join(uploadsDir, path.basename(x)));
-async function unlinkFiles(files) { await Promise.all(files.map(file => fs.promises.unlink(file).catch(e => { if (e.code !== "ENOENT") console.error("File cleanup failed", file, e.message); }))); }
+const filesFor = projects => [...new Set(projects.flatMap(p => (p.drawings || []).flatMap(d => [d.pdfFile, d.dwgFile])).filter(Boolean))];
+async function unlinkUnusedFiles(files) {
+  await Promise.all(files.map(async file => {
+    const referenced = await Project.exists({ $or:[{ "drawings.pdfFile":file },{ "drawings.dwgFile":file }] });
+    if (referenced) return;
+    const localFile = path.join(uploadsDir, path.basename(file));
+    await fs.promises.unlink(localFile).catch(e => { if (e.code !== "ENOENT") console.error("File cleanup failed", localFile, e.message); });
+  }));
+}
 async function checkWorkers(drawings, company, session) {
-  const ids = [...new Set(assignments(drawings).map(x => x.workerId).filter(Boolean))];
-  if (!assignments(drawings).length) throw fail("At least one worker is required", 422, "WORKER_REQUIRED");
-  if (await Worker.countDocuments({ _id: { $in: ids }, company }).session(session) !== ids.length) throw fail("Worker company mismatch", 422, "INVALID_WORKER");
+  if (!hasRequiredWorker(drawings)) throw fail("At least one worker is required", 422, "WORKER_REQUIRED");
+  const newTasks = assignments(drawings).filter(task => !task._id);
+  if (newTasks.some(task => !task.workerId)) throw fail("Worker company mismatch", 422, "INVALID_WORKER");
+  const ids = [...new Set(newTasks.map(task => task.workerId).filter(Boolean))];
+  const workers = await Worker.find({ _id: { $in: ids }, company }).select("fullName").session(session);
+  if (workers.length !== ids.length) throw fail("Worker company mismatch", 422, "INVALID_WORKER");
+  const names = new Map(workers.map(worker => [String(worker._id), worker.fullName]));
+  for (const task of newTasks) task.workerName = names.get(String(task.workerId));
 }
 function preserveTaskLifecycle(currentDrawings, nextDrawings) {
   const existing = new Map(assignments(currentDrawings).map(task => [String(task._id), task]));
@@ -175,8 +187,8 @@ async function taskAction(req,res,action){
 for(const action of ["pause","resume","complete"])router.put(`/:projectId/tasks/:taskId/${action}`,(req,res)=>taskAction(req,res,action));
 
 router.put("/:id/complete-task",validate(schemas.completeTask),async(req,res)=>{req.params.projectId=req.params.id;req.taskIndexes=req.body;return taskAction(req,res,"complete");});
-router.put("/:id/remove-worker",validate(schemas.removeWorker),async(req,res)=>{const session=await Project.startSession();let project;try{await session.withTransaction(async()=>{const p=await Project.findById(req.params.id).session(session);if(!p)throw fail("Not found",404,"NOT_FOUND");if(!userCanAccessCompany(req.user,p.company))throw fail("Company access denied",403,"COMPANY_ACCESS_DENIED");const revision=p.revision,d=p.drawings[req.body.drawingIndex],task=d?.assignedWorkers[req.body.workerIndex];if(!task)throw fail("Invalid worker index",400,"INVALID_WORKER_INDEX");if(task.status!=="pending")throw fail("Only pending tasks can be removed",409,"TASK_ALREADY_STARTED");if(assignments(p.drawings).length===1)throw fail("Cannot remove last worker",422,"WORKER_REQUIRED");d.assignedWorkers.splice(req.body.workerIndex,1);project=await saveProjectRevision(p,revision,session);});res.json(project);}finally{await session.endSession();}});
+router.put("/:id/remove-worker",validate(schemas.removeWorker),async(req,res)=>{const session=await Project.startSession();let project;try{await session.withTransaction(async()=>{const p=await Project.findById(req.params.id).session(session);if(!p)throw fail("Not found",404,"NOT_FOUND");if(!userCanAccessCompany(req.user,p.company))throw fail("Company access denied",403,"COMPANY_ACCESS_DENIED");const revision=p.revision,d=p.drawings[req.body.drawingIndex],task=d?.assignedWorkers[req.body.workerIndex];if(!task)throw fail("Invalid worker index",400,"INVALID_WORKER_INDEX");if(task.status!=="pending")throw fail("Only pending tasks can be removed",409,"TASK_ALREADY_STARTED");if(!d.isAssemblyDrawing&&d.assignedWorkers.length===1)throw fail("Cannot remove last worker",422,"WORKER_REQUIRED");d.assignedWorkers.splice(req.body.workerIndex,1);project=await saveProjectRevision(p,revision,session);});res.json(project);}finally{await session.endSession();}});
 
-router.delete("/:id",async(req,res)=>{const p=await Project.findById(req.params.id);if(!p)return res.status(404).json({error:"Not found"});if(!userCanAccessCompany(req.user,p.company))return res.status(403).json({error:"Company access denied"});const files=filesFor([p]),session=await Project.startSession();try{await session.withTransaction(async()=>{const current=await Project.findById(p._id).session(session);if(!current)throw fail("Not found",404,"NOT_FOUND");if(current.inventoryMode==="reserved-v2"&&current.status==="active")for(const[id,n]of aggregateMaterials(current.drawings)){const item=await WarehouseItem.findOneAndUpdate({_id:id,company:current.company,reservedQty:{$gte:n}},{$inc:{reservedQty:-n}},{new:true,session});if(!item)throw fail("Inventory conflict",409,"INVENTORY_CONFLICT");await movement(item,current,{reservedDelta:-n,type:"release"},req,session);}await Project.deleteOne({_id:current._id},{session});});await unlinkFiles(files);res.json({message:"Deleted"});}finally{await session.endSession();}});
+router.delete("/:id",async(req,res)=>{const p=await Project.findById(req.params.id);if(!p)return res.status(404).json({error:"Not found"});if(!userCanAccessCompany(req.user,p.company))return res.status(403).json({error:"Company access denied"});const files=filesFor([p]),session=await Project.startSession();try{await session.withTransaction(async()=>{const current=await Project.findById(p._id).session(session);if(!current)throw fail("Not found",404,"NOT_FOUND");if(current.inventoryMode==="reserved-v2"&&current.status==="active")for(const[id,n]of aggregateMaterials(current.drawings)){const item=await WarehouseItem.findOneAndUpdate({_id:id,company:current.company,reservedQty:{$gte:n}},{$inc:{reservedQty:-n}},{new:true,session});if(!item)throw fail("Inventory conflict",409,"INVENTORY_CONFLICT");await movement(item,current,{reservedDelta:-n,type:"release"},req,session);}await Project.deleteOne({_id:current._id},{session});});await unlinkUnusedFiles(files);res.json({message:"Deleted"});}finally{await session.endSession();}});
 
 export default router;

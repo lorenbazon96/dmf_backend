@@ -25,6 +25,8 @@ const drawing = z.object({
   assignedMaterials: z.array(assignedMaterial).optional(),
   assignedWorkers: z.array(assignedWorker).optional(),
 }).passthrough();
+const warehouseReceipt = z.object({ direction: z.literal("in"), quantity: z.number().finite().positive(), supplier: text.min(1), note: text.optional() });
+const warehouseIssue = z.object({ direction: z.literal("out"), quantity: z.number().finite().positive(), destination: text.min(1), note: text.optional() });
 
 export const schemas = {
   register: z.object({ email, password, fullName: text.optional(), role: z.enum(["admin", "user"]).optional(), companies: z.array(company).max(100).optional() }),
@@ -36,11 +38,13 @@ export const schemas = {
   client: z.object({ clientType: z.enum(["company", "person"]).optional(), clientName: text.optional(), country: text.optional(), adressa: text.optional(), owner: text.optional(), contact: text.optional(), email: z.union([email, z.literal("")]).optional(), oib: text.optional(), company: company.optional(), responsiblePersons: z.array(z.object({ fullName: text.optional(), email: z.union([email, z.literal("")]).optional(), contact: text.optional(), note: text.optional() })).max(100).optional() }),
   worker: z.object({ fullName: text.optional(), email: z.union([email, z.literal("")]).optional(), address: text.optional(), contact: text.optional(), jobPosition: text.optional(), busy: z.boolean().optional(), freeIn: text.optional(), company: company.optional(), ratings: z.record(z.string(), z.number().min(0).max(100)).optional(), operations: z.record(z.string(), z.boolean()).optional(), projectsCompleted: z.number().int().min(0).optional() }),
   workerRating: z.object({ operation: z.enum(["pipeCutting", "sheetCutting", "welding", "bending", "grinding", "drilling", "assembly"]), rating: z.number().min(0).max(100) }),
-  warehouse: z.object({ type: text.optional(), name: text.optional(), specs: text.optional(), qty: z.number().min(0).optional(), company: company.optional() }),
+  warehouse: z.object({ type: text.optional(), name: text.optional(), specs: text.optional(), qty: z.number().min(0).optional(), company: company.optional(), supplier: text.optional() }).superRefine((value, ctx) => {
+    if (Number(value.qty) > 0 && !value.supplier?.trim()) ctx.addIssue({ code: "custom", path: ["supplier"], message: "Supplier is required for opening stock" });
+  }),
   warehouseMetadata: z.object({ type: text.optional(), name: text.optional(), specs: text.optional() }),
-  warehouseAdjustment: z.object({ delta: z.number().finite().refine(v => v !== 0), reason: text.min(1) }),
+  warehouseAdjustment: z.discriminatedUnion("direction", [warehouseReceipt, warehouseIssue]),
   project: z.object({ rn: text.optional(), name: text.optional(), client: text.optional(), responsible: text.optional(), company: company.optional(), drawings: z.array(drawing).max(1000).optional() }),
-  completeTask: z.object({ drawingIndex: index, workerIndex: index, completedAt: z.coerce.date().optional() }),
+  completeTask: z.object({ drawingIndex: index, workerIndex: index }),
   removeWorker: z.object({ drawingIndex: index, workerIndex: index }),
 };
 

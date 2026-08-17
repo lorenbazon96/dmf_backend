@@ -17,6 +17,11 @@ export function nextRevision(revision) {
   return revision + 1;
 }
 
+export function hasRequiredWorker(drawings = []) {
+  const productionDrawings = drawings.filter(drawing => !drawing.isAssemblyDrawing);
+  return productionDrawings.every(drawing => (drawing.assignedWorkers || []).some(task => task.workerId));
+}
+
 export function findTask(project, taskId) {
   for (const drawing of project.drawings || []) {
     const task = (drawing.assignedWorkers || []).find(item => String(item._id) === String(taskId));

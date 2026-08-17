@@ -7,6 +7,7 @@ const userSchema = new mongoose.Schema({
   fullName: { type: String, default: "" },
   role: { type: String, default: "user" },
   companies: { type: [String], default: [] },
+  passwordResetVersion: { type: Number, default: 0 },
   createdAt: { type: Date, default: Date.now },
 });
 

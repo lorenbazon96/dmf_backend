@@ -24,6 +24,15 @@ test("project validation preserves drawing payload shape and rejects invalid use
  const parsed=schemas.project.parse(base); assert.equal(parsed.drawings[0].drawingNo,"1"); assert.equal(parsed.drawings[0].assignedWorkers[0].frontendField,true);
  for(const useQty of [0,-1,Infinity,NaN])assert.equal(schemas.project.safeParse({drawings:[{assignedMaterials:[{useQty}]}]}).success,false);
 });
+test("warehouse movements require traceable receipt and issue details",()=>{
+ assert.equal(schemas.warehouseAdjustment.safeParse({direction:"in",quantity:2,supplier:"Supplier"}).success,true);
+ assert.equal(schemas.warehouseAdjustment.safeParse({direction:"in",quantity:2}).success,false);
+ assert.equal(schemas.warehouseAdjustment.safeParse({direction:"out",quantity:1,destination:"Job site"}).success,true);
+ assert.equal(schemas.warehouseAdjustment.safeParse({direction:"out",quantity:1}).success,false);
+ assert.equal(schemas.warehouseAdjustment.safeParse({direction:"out",quantity:0,destination:"Job site"}).success,false);
+ assert.equal(schemas.warehouse.safeParse({qty:5}).success,false);
+ assert.equal(schemas.warehouse.safeParse({qty:5,supplier:"Supplier"}).success,true);
+});
 test("company access permits assigned users and preserves non-admin company filtering",()=>{
  const user={role:"user",companies:["A"]};
  assert.equal(userCanAccessCompany(user,"A"),true); assert.equal(userCanAccessCompany(user,"B"),false);

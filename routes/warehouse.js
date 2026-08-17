@@ -50,6 +50,7 @@ router.post("/", validate(schemas.warehouse), async (req, res) => {
           qtyDelta: item.qty,
           type: "opening",
           actorUserId: req.user.id,
+          supplier: req.body.supplier,
           reason: "Initial stock",
         }], { session });
       }
@@ -77,9 +78,10 @@ router.post("/:id/adjust", validate(schemas.warehouseAdjustment), async (req, re
     const existing = await WarehouseItem.findById(req.params.id).session(session);
     if (!existing) { const e=new Error("Not found"); e.status=404; throw e; }
     if (!userCanAccessCompany(req.user, existing.company)) { const e=new Error("Denied"); e.status=403; throw e; }
-    item = await WarehouseItem.findOneAndUpdate({ _id: existing._id, $expr: { $gte: [{ $add: ["$qty", req.body.delta] }, "$reservedQty"] } }, { $inc: { qty: req.body.delta } }, { new:true, session });
+    const delta = req.body.direction === "in" ? req.body.quantity : -req.body.quantity;
+    item = await WarehouseItem.findOneAndUpdate({ _id: existing._id, $expr: { $gte: [{ $add: ["$qty", delta] }, "$reservedQty"] } }, { $inc: { qty: delta } }, { new:true, session });
     if (!item) { const e=new Error("Adjustment violates reserved stock"); e.status=409; e.code="INSUFFICIENT_AVAILABLE_STOCK"; throw e; }
-    await WarehouseMovement.create([{ warehouseItemId:item._id,company:item.company,itemName:item.name,qtyDelta:req.body.delta,type:"manual-adjustment",actorUserId:req.user.id,reason:req.body.reason }],{session});
+    await WarehouseMovement.create([{ warehouseItemId:item._id,company:item.company,itemName:item.name,qtyDelta:delta,type:req.body.direction==="in"?"manual-receipt":"manual-issue",actorUserId:req.user.id,supplier:req.body.supplier||"",destination:req.body.destination||"",reason:req.body.note||"" }],{session});
   }); res.json(item); } finally { await session.endSession(); }
 });
 
