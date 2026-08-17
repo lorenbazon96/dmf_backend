@@ -21,16 +21,6 @@ const storage = multer.diskStorage({
 const upload = multer({
   storage,
   limits: { fileSize: 25 * 1024 * 1024, files: 1, fields: 5, parts: 6 },
-  fileFilter: (req, file, cb) => {
-    const allowed = [".pdf", ".dwg"];
-    const ext = path.extname(file.originalname).toLowerCase();
-    const mimeAllowed = ext === ".pdf" ? file.mimetype === "application/pdf" : ["application/acad", "application/x-acad", "application/autocad", "application/x-autocad", "image/vnd.dwg", "application/octet-stream"].includes(file.mimetype);
-    if (allowed.includes(ext) && mimeAllowed) {
-      cb(null, true);
-    } else {
-      cb(new Error("Only PDF and DWG files are allowed"));
-    }
-  },
 });
 
 const router = Router();
