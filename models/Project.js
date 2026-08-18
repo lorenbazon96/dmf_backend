@@ -1,5 +1,27 @@
 import mongoose from "mongoose";
 
+const taskHistorySchema = new mongoose.Schema({
+  from: String,
+  to: String,
+  at: Date,
+  actorUserId: mongoose.Schema.Types.ObjectId,
+  reason: String,
+}, { _id: false });
+
+const previousAssignmentSchema = new mongoose.Schema({
+  workerName: String,
+  workerId: String,
+  operation: String,
+  note: String,
+  type: String,
+  status: String,
+  estimatedMinutes: Number,
+  actualMinutes: Number,
+  startedAt: Date,
+  endedAt: Date,
+  history: [taskHistorySchema],
+}, { _id: false });
+
 const assignmentSchema = new mongoose.Schema({
   workerName: String,
   workerId: { type: String, default: "" },
@@ -13,7 +35,8 @@ const assignmentSchema = new mongoose.Schema({
   totalPausedMs: { type: Number, default: 0 },
   actualMinutes: { type: Number, default: null },
   pausedByProject: { type: Boolean, default: false },
-  history: [{ from: String, to: String, at: Date, actorUserId: mongoose.Schema.Types.ObjectId, reason: String }],
+  history: [taskHistorySchema],
+  previousAssignments: { type: [previousAssignmentSchema], default: [] },
   completedAt: { type: Date, default: null },
 });
 

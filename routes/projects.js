@@ -7,7 +7,7 @@ import WarehouseItem from "../models/WarehouseItem.js";
 import WarehouseMovement from "../models/WarehouseMovement.js";
 import Worker from "../models/Worker.js";
 import { aggregateMaterials, inventoryDelta, resolveMaterials, validTransition } from "../services/inventory.js";
-import { activateAvailableTasks, canTransitionTask, elapsedMinutes, findTask, hasRequiredWorker, nextRevision, projectAllowsTaskAction } from "../services/tasks.js";
+import { activateAvailableTasks, canTransitionTask, elapsedMinutes, findTask, hasRequiredWorker, nextRevision, projectAllowsTaskAction, projectReadinessIssues } from "../services/tasks.js";
 import { companyFilterForUser, userCanAccessCompany } from "../middleware/auth.js";
 import { schemas, validate } from "../middleware/validation.js";
 
@@ -26,29 +26,85 @@ async function unlinkUnusedFiles(files) {
     await fs.promises.unlink(localFile).catch(e => { if (e.code !== "ENOENT") console.error("File cleanup failed", localFile, e.message); });
   }));
 }
-async function checkWorkers(drawings, company, session) {
-  if (!hasRequiredWorker(drawings)) throw fail("At least one worker is required", 422, "WORKER_REQUIRED");
-  const newTasks = assignments(drawings).filter(task => !task._id);
-  if (newTasks.some(task => !task.workerId)) throw fail("Worker company mismatch", 422, "INVALID_WORKER");
-  const ids = [...new Set(newTasks.map(task => task.workerId).filter(Boolean))];
+async function checkWorkers(drawings, company, session, { requireAll = false, validateAll = false } = {}) {
+  if (requireAll && !hasRequiredWorker(drawings)) throw fail("At least one worker is required", 422, "WORKER_REQUIRED");
+  const tasks = validateAll ? assignments(drawings) : assignments(drawings).filter(task => !task._id);
+  if (tasks.some(task => !task.workerId)) throw fail("Worker company mismatch", 422, "INVALID_WORKER");
+  const ids = [...new Set(tasks.map(task => task.workerId).filter(Boolean))];
   const workers = await Worker.find({ _id: { $in: ids }, company }).select("fullName").session(session);
   if (workers.length !== ids.length) throw fail("Worker company mismatch", 422, "INVALID_WORKER");
   const names = new Map(workers.map(worker => [String(worker._id), worker.fullName]));
-  for (const task of newTasks) task.workerName = names.get(String(task.workerId));
+  for (const task of tasks) task.workerName = names.get(String(task.workerId));
 }
-function preserveTaskLifecycle(currentDrawings, nextDrawings) {
+export function preserveTaskLifecycle(currentDrawings, nextDrawings, now = new Date(), actorUserId = null) {
   const existing = new Map(assignments(currentDrawings).map(task => [String(task._id), task]));
-  const lifecycle = ["status", "startedAt", "pausedAt", "totalPausedMs", "actualMinutes", "pausedByProject", "history", "completedAt"];
+  const submittedIds = new Set(assignments(nextDrawings).map(task => task._id && String(task._id)).filter(Boolean));
+  const removedStartedTasks = assignments(currentDrawings).filter(task =>
+    task._id && task.status !== "pending" && !submittedIds.has(String(task._id))
+  );
+  const matched = new Set();
+  const lifecycle = ["status", "startedAt", "pausedAt", "totalPausedMs", "actualMinutes", "pausedByProject", "history", "previousAssignments", "completedAt"];
+
+  const historicalAssignments = task => (task.previousAssignments || []).map(item =>
+    typeof item.toObject === "function" ? item.toObject() : { ...item }
+  );
+
   for (const task of assignments(nextDrawings)) {
-    const old = task._id ? existing.get(String(task._id)) : null;
+    let old = task._id ? existing.get(String(task._id)) : null;
+    if (!old && !task._id) {
+      old = removedStartedTasks.find(candidate =>
+        !matched.has(String(candidate._id)) &&
+        candidate.status !== "completed" &&
+        candidate.operation === task.operation
+      );
+    }
+    if (old) matched.add(String(old._id));
     const sameTask = old && String(old.workerId) === String(task.workerId) && old.operation === task.operation;
     for (const field of lifecycle) delete task[field];
     if (sameTask) {
+      task._id ||= old._id;
       for (const field of lifecycle) task[field] = old[field];
+      if (old.status === "completed") {
+        for (const field of ["workerName", "workerId", "operation", "note", "type", "estimatedMinutes"]) {
+          task[field] = old[field];
+        }
+      }
+    } else if (old) {
+      if (old.status === "completed") throw fail("Completed task cannot be changed",409,"COMPLETED_TASK_IMMUTABLE");
+      if (old.status !== "pending" && old.operation !== task.operation) {
+        throw fail("A started task operation cannot be changed",409,"STARTED_TASK_OPERATION_IMMUTABLE");
+      }
+      const previousAssignments = historicalAssignments(old);
+      if (old.startedAt) {
+        const actualMinutes = elapsedMinutes(old, now);
+        previousAssignments.push({
+          workerName: old.workerName,
+          workerId: old.workerId,
+          operation: old.operation,
+          note: old.note,
+          type: old.type,
+          status: old.status,
+          estimatedMinutes: old.estimatedMinutes || 0,
+          actualMinutes,
+          startedAt: old.startedAt,
+          endedAt: now,
+          history: [...(old.history || []), { from:old.status, to:"reassigned", at:now, actorUserId, reason:"worker-reassigned" }],
+        });
+        task.estimatedMinutes = Math.max(0, Number(old.estimatedMinutes || 0) - actualMinutes);
+      }
+      task.previousAssignments = previousAssignments;
+      delete task._id;
+      task.status = "pending";
     } else {
       delete task._id;
       task.status = "pending";
     }
+  }
+
+  for (const old of removedStartedTasks) {
+    if (matched.has(String(old._id))) continue;
+    if (old.status === "completed") throw fail("Completed task cannot be changed",409,"COMPLETED_TASK_IMMUTABLE");
+    throw fail("A started task must be reassigned instead of removed",409,"STARTED_TASK_REASSIGNMENT_REQUIRED");
   }
 }
 async function movement(item, project, values, req, session) {
@@ -87,8 +143,8 @@ router.put("/:id", validate(schemas.project), async (req,res) => {
   try { await session.withTransaction(async()=>{
     const current=await Project.findOne({_id:snapshot._id,revision:snapshot.revision}).session(session); if(!current)throw fail("Project was modified",409,"PROJECT_CONFLICT");
     const drawings=req.body.drawings ?? current.drawings.map(d=>d.toObject());
-    if (req.body.drawings !== undefined) preserveTaskLifecycle(current.drawings, drawings);
-    await checkWorkers(drawings,current.company,session);
+    if (req.body.drawings !== undefined) preserveTaskLifecycle(current.drawings, drawings, new Date(), req.user.id);
+    await checkWorkers(drawings,current.company,session,{requireAll:current.status!=="active"});
     if(req.body.drawings!==undefined){
       if (current.inventoryMode === "reserved-v2") await resolveMaterials(drawings,current.company,session);
       else {
@@ -116,6 +172,10 @@ router.put("/:id/start", async(req,res)=>{
     if(!current)throw fail("Not found",404,"NOT_FOUND");
     if(!userCanAccessCompany(req.user,current.company))throw fail("Company access denied",403,"COMPANY_ACCESS_DENIED");
     if(current.status!=="active")throw fail("Invalid transition",409,"INVALID_TRANSITION");
+    const readinessIssues=projectReadinessIssues(current.drawings);
+    if(readinessIssues.length)throw fail("Project is not ready to start",422,"PROJECT_NOT_READY");
+    await checkWorkers(current.drawings,current.company,session,{requireAll:true,validateAll:true});
+    await resolveMaterials(current.drawings,current.company,session);
     if(current.inventoryMode==="reserved-v2")for(const[id,n]of aggregateMaterials(current.drawings)){
       const item=await WarehouseItem.findOneAndUpdate({_id:id,company:current.company,reservedQty:{$gte:n},qty:{$gte:n}},{$inc:{qty:-n,reservedQty:-n}},{new:true,session});
       if(!item)throw fail("Inventory conflict",409,"INVENTORY_CONFLICT");

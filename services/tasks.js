@@ -22,6 +22,21 @@ export function hasRequiredWorker(drawings = []) {
   return productionDrawings.every(drawing => (drawing.assignedWorkers || []).some(task => task.workerId));
 }
 
+export function projectReadinessIssues(drawings = []) {
+  if (!drawings.length) return [{ code: "DRAWING_REQUIRED" }];
+  const issues = [];
+  for (const drawing of drawings) {
+    if (drawing.isAssemblyDrawing) continue;
+    const tasks = drawing.assignedWorkers || [];
+    if (!tasks.some(task => task.workerId)) {
+      issues.push({ code: "WORKER_REQUIRED", drawingNo: drawing.drawingNo || "" });
+    } else if (!tasks.some(task => task.workerId && task.operation)) {
+      issues.push({ code: "OPERATION_REQUIRED", drawingNo: drawing.drawingNo || "" });
+    }
+  }
+  return issues;
+}
+
 export function findTask(project, taskId) {
   for (const drawing of project.drawings || []) {
     const task = (drawing.assignedWorkers || []).find(item => String(item._id) === String(taskId));
