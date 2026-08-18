@@ -58,20 +58,39 @@ export function taskCanStart(drawing, task) {
 
 export function activateAvailableTasks(projects, now, actorUserId) {
   const changed = new Set();
-  const busyWorkers = new Set();
-  for (const project of projects) {
+  const ordered = [...projects].sort((a, b) =>
+    new Date(a.startedAt || a.createdAt || 0) - new Date(b.startedAt || b.createdAt || 0)
+  );
+  const priority = new Map(ordered.map((project, index) => [project, index]));
+  const manuallyReservedWorkers = new Set();
+  const activeByWorker = new Map();
+
+  const pauseForPriority = ({ project, task }) => {
+    task.history ||= [];
+    task.history.push({ from:"in-progress", to:"paused", at:now, actorUserId, reason:"higher-priority-project" });
+    task.status = "paused";
+    task.pausedAt = now;
+    task.pausedByProject = true;
+    changed.add(project);
+  };
+
+  for (const project of ordered) {
     if (project.status !== "in-progress") continue;
     for (const drawing of project.drawings || []) {
       for (const task of drawing.assignedWorkers || []) {
-        const reservesWorker = task.status === "in-progress" || (task.status === "paused" && !task.pausedByProject);
-        if (reservesWorker && task.workerId) busyWorkers.add(String(task.workerId));
+        const workerId = String(task.workerId || "");
+        if (!workerId) continue;
+        if (task.status === "paused" && !task.pausedByProject) {
+          manuallyReservedWorkers.add(workerId);
+        } else if (task.status === "in-progress") {
+          const incumbent = activeByWorker.get(workerId);
+          if (!incumbent) activeByWorker.set(workerId, { project, task });
+          else pauseForPriority({ project, task });
+        }
       }
     }
   }
 
-  const ordered = [...projects].sort((a, b) =>
-    new Date(a.startedAt || a.createdAt || 0) - new Date(b.startedAt || b.createdAt || 0)
-  );
   for (const project of ordered) {
     if (project.status !== "in-progress") continue;
     for (const drawing of project.drawings || []) {
@@ -80,7 +99,13 @@ export function activateAvailableTasks(projects, now, actorUserId) {
         if (task.status !== "pending" && !resumesWithProject) continue;
         if (!resumesWithProject && !taskCanStart(drawing, task)) continue;
         const workerId = String(task.workerId || "");
-        if (!workerId || busyWorkers.has(workerId)) continue;
+        if (!workerId || manuallyReservedWorkers.has(workerId)) continue;
+
+        const incumbent = activeByWorker.get(workerId);
+        if (incumbent) {
+          if (priority.get(incumbent.project) <= priority.get(project)) continue;
+          pauseForPriority(incumbent);
+        }
 
         const from = task.status;
         task.status = "in-progress";
@@ -94,7 +119,7 @@ export function activateAvailableTasks(projects, now, actorUserId) {
         }
         task.history ||= [];
         task.history.push({ from, to:"in-progress", at:now, actorUserId, reason:resumesWithProject ? "project-resumed" : "auto-start" });
-        busyWorkers.add(workerId);
+        activeByWorker.set(workerId, { project, task });
         changed.add(project);
       }
     }
